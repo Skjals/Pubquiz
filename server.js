@@ -288,7 +288,7 @@ var teamId = sessionStorage.getItem("teamId") || "";
 var teamName = sessionStorage.getItem("teamName") || "";
 var view = "home"; // home | join | play | admin-login | admin-setup | admin-live | admin-theme
 var s = null; // laatste serverstate
-var myAnswers = {};
+var pinFormOpen = false;
 var msg = "";
 
 function $(sel, el) { return (el || document).querySelector(sel); }
@@ -556,26 +556,32 @@ function renderAdminLive(app) {
   var reset = el("button", "ghost", "&#128465;&#65039; Teams wissen");
   reset.onclick = function () { if (confirm("Alle teams en antwoorden wissen? (Vragen blijven staan.)")) api("/api/admin/control", { pin: pin, action: "reset" }).then(refreshAndRender); };
   br.appendChild(done); br.appendChild(reset);
-  var pinBtn = el("button", "ghost", "&#128273; PIN wijzigen");
-  pinBtn.onclick = function () {
+  if (!pinFormOpen) {
+    var pinBtn = el("button", "ghost", "&#128273; PIN wijzigen");
+    pinBtn.onclick = function () { pinFormOpen = true; render(); };
+    br.appendChild(pinBtn);
+  } else {
     var box = el("div");
     box.style.cssText = "margin-top:10px";
     box.appendChild(el("label", null, "Huidige PIN"));
     var o = el("input"); o.type = "password"; o.inputMode = "numeric"; box.appendChild(o);
-    box.appendChild(el("label", null, "Nieuwe PIN (4 t/m 6 cijfers)"));
+    box.appendChild(el("label", null, "Nieuwe PIN (4 t/v 6 cijfers)"));
     var n = el("input"); n.type = "password"; n.inputMode = "numeric"; box.appendChild(n);
-    var sv = el("button", "wide", "PIN wijzigen");
+    var sv = el("button", null, "PIN wijzigen");
     sv.onclick = function () {
       api("/api/admin/change-pin", { pin: o.value, newPin: n.value }).then(function (r) {
         if (r.error) { msg = r.error; render(); return; }
         pin = n.value; sessionStorage.setItem("pin", pin);
-        msg = "PIN gewijzigd!"; render();
+        pinFormOpen = false; msg = "PIN gewijzigd!"; render();
       });
     };
-    box.appendChild(sv);
-    pinBtn.replaceWith(box);
-  };
-  br.appendChild(pinBtn);
+    var cl = el("button", "ghost", "Annuleren");
+    cl.onclick = function () { pinFormOpen = false; render(); };
+    var row = el("div", "btnrow");
+    row.appendChild(sv); row.appendChild(cl);
+    box.appendChild(row);
+    c.appendChild(box);
+  }
   c.appendChild(br);
   app.appendChild(c);
 
@@ -622,7 +628,7 @@ function refreshAndRender() { return refreshState().then(render); }
 
 setInterval(function () {
   refreshState().then(function () {
-    if (view === "play" || view === "admin-live") render();
+    if ((view === "play" || view === "admin-live") && !pinFormOpen) render();
   });
 }, 2500);
 
