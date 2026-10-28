@@ -288,7 +288,7 @@ var teamId = sessionStorage.getItem("teamId") || "";
 var teamName = sessionStorage.getItem("teamName") || "";
 var view = "home"; // home | join | play | admin-login | admin-setup | admin-live | admin-theme
 var s = null; // laatste serverstate
-var pinFormOpen = false;
+var myAnswers = {}; var pinFormOpen = false;
 var msg = "";
 
 function $(sel, el) { return (el || document).querySelector(sel); }
