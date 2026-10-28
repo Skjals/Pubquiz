@@ -496,7 +496,7 @@ function renderAdminSetup(app) {
   var save = el("button", null, "Opslaan");
   save.onclick = function () {
     api("/api/admin/update", { pin: pin, quizName: qn.value, rounds: rounds }).then(function (r) {
-      msg = r.error || "Opgeslagen!"; render();
+      msg = r.error || "Opgeslagen!"; refreshAndRender();
     });
   };
   br.appendChild(addR); br.appendChild(save);
@@ -626,9 +626,13 @@ function refreshAndRender() { return refreshState().then(render); }
 
 // ---------- Live updates (polling) ----------
 
+var lastPlayKey = "";
 setInterval(function () {
   refreshState().then(function () {
-    if ((view === "play" || view === "admin-live") && !pinFormOpen) render();
+    if (view === "play" && !pinFormOpen) {
+      var key = s.status + "|" + (s.round ? s.round.index : "-") + "|" + (s.finalScores ? s.finalScores.length : 0);
+      if (key !== lastPlayKey) { lastPlayKey = key; render(); }
+    } else if (view === "admin-live" && !pinFormOpen) render();
   });
 }, 2500);
 
