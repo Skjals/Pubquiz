@@ -166,6 +166,16 @@ async function handleApi(req, res, url) {
     return json(res, 200, { ok: isPinOk(b) });
   }
 
+  if (route === "/api/admin/change-pin" && req.method === "POST") {
+    const b = await body(req, res);
+    if (!isPinOk(b)) return json(res, 403, { error: "Huidige PIN klopt niet." });
+    const npin = String(b.newPin || "").trim();
+    if (!/^\d{4,6}$/.test(npin)) return json(res, 400, { error: "Kies een nieuwe PIN van 4 t/m 6 cijfers." });
+    state.pin = npin;
+    saveState();
+    return json(res, 200, { ok: true });
+  }
+
   if (route === "/api/admin/update" && req.method === "POST") {
     const b = await body(req, res);
     if (!isPinOk(b)) return json(res, 403, { error: "PIN klopt niet." });
@@ -546,6 +556,26 @@ function renderAdminLive(app) {
   var reset = el("button", "ghost", "&#128465;&#65039; Teams wissen");
   reset.onclick = function () { if (confirm("Alle teams en antwoorden wissen? (Vragen blijven staan.)")) api("/api/admin/control", { pin: pin, action: "reset" }).then(refreshAndRender); };
   br.appendChild(done); br.appendChild(reset);
+  var pinBtn = el("button", "ghost", "&#128273; PIN wijzigen");
+  pinBtn.onclick = function () {
+    var box = el("div");
+    box.style.cssText = "margin-top:10px";
+    box.appendChild(el("label", null, "Huidige PIN"));
+    var o = el("input"); o.type = "password"; o.inputMode = "numeric"; box.appendChild(o);
+    box.appendChild(el("label", null, "Nieuwe PIN (4 t/m 6 cijfers)"));
+    var n = el("input"); n.type = "password"; n.inputMode = "numeric"; box.appendChild(n);
+    var sv = el("button", "wide", "PIN wijzigen");
+    sv.onclick = function () {
+      api("/api/admin/change-pin", { pin: o.value, newPin: n.value }).then(function (r) {
+        if (r.error) { msg = r.error; render(); return; }
+        pin = n.value; sessionStorage.setItem("pin", pin);
+        msg = "PIN gewijzigd!"; render();
+      });
+    };
+    box.appendChild(sv);
+    pinBtn.replaceWith(box);
+  };
+  br.appendChild(pinBtn);
   c.appendChild(br);
   app.appendChild(c);
 
