@@ -283,7 +283,7 @@ const CLIENT_HTML = `<!DOCTYPE html>
 </div>
 <script>
 "use strict";
-var pin = sessionStorage.getItem("pin") || "";
+var pin = localStorage.getItem("pin") || "";
 var teamId = sessionStorage.getItem("teamId") || "";
 var teamName = sessionStorage.getItem("teamName") || "";
 var view = "home"; // home | join | play | admin-login | admin-setup | admin-live | admin-theme
@@ -425,7 +425,7 @@ function renderAdminLogin(app) {
     b.onclick = function () {
       api("/api/admin/setup-pin", { pin: p1.value }).then(function (r) {
         if (r.error) { msg = r.error; render(); return; }
-        pin = p1.value; sessionStorage.setItem("pin", pin);
+        pin = p1.value; localStorage.setItem("pin", pin);
         view = "admin-live"; render();
       });
     };
@@ -438,7 +438,7 @@ function renderAdminLogin(app) {
     b2.onclick = function () {
       api("/api/admin/login", { pin: p2.value }).then(function (r) {
         if (!r.ok) { msg = "PIN klopt niet."; render(); return; }
-        pin = p2.value; sessionStorage.setItem("pin", pin);
+        pin = p2.value; localStorage.setItem("pin", pin);
         view = "admin-live"; render();
       });
     };
@@ -540,6 +540,22 @@ function renderAdminLive(app) {
 
   var c = el("div", "card");
 
+  // Einduitslag + nieuwe start als de quiz afgerond is
+  if (s.status === "done") {
+    var dc = el("div", "card");
+    dc.appendChild(el("h2", null, "&#127942; Quiz afgerond!"));
+    (s.finalScores || s.teams.slice().sort(function (a, b) { return b.score - a.score; })).forEach(function (t, i) {
+      dc.appendChild(el("div", "row" + (i === 0 ? " top" : ""),
+        "<span>" + ["&#129351;","&#129352;","&#129353;"][i] + " " + t.name + "</span><span class='score'>" + t.score + "</span>"));
+    });
+    var nb = el("button", "wide", "&#128260; Nieuwe quizavond starten");
+    nb.onclick = function () {
+      api("/api/admin/control", { pin: pin, action: "reset" }).then(refreshAndRender);
+    };
+    dc.appendChild(nb);
+    app.appendChild(dc);
+  }
+
   // Besturing
   c.appendChild(el("h2", null, "&#127919; Besturing"));
   var cInfo = el("p", null, s.status === "setup" ? "Quiz nog niet gestart." :
@@ -571,7 +587,7 @@ function renderAdminLive(app) {
     sv.onclick = function () {
       api("/api/admin/change-pin", { pin: o.value, newPin: n.value }).then(function (r) {
         if (r.error) { msg = r.error; render(); return; }
-        pin = n.value; sessionStorage.setItem("pin", pin);
+        pin = n.value; localStorage.setItem("pin", pin);
         pinFormOpen = false; msg = "PIN gewijzigd!"; render();
       });
     };
@@ -627,12 +643,16 @@ function refreshAndRender() { return refreshState().then(render); }
 // ---------- Live updates (polling) ----------
 
 var lastPlayKey = "";
+var lastLiveKey = "";
 setInterval(function () {
   refreshState().then(function () {
     if (view === "play" && !pinFormOpen) {
       var key = s.status + "|" + (s.round ? s.round.index : "-") + "|" + (s.finalScores ? s.finalScores.length : 0);
       if (key !== lastPlayKey) { lastPlayKey = key; render(); }
-    } else if (view === "admin-live" && !pinFormOpen) render();
+    } else if (view === "admin-live" && !pinFormOpen) {
+      var lk = s.status + "|" + s.activeRound + "|" + s.rounds.length + "|" + JSON.stringify(s.teams);
+      if (lk !== lastLiveKey) { lastLiveKey = lk; render(); }
+    }
   });
 }, 2500);
 
