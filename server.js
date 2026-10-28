@@ -333,7 +333,7 @@ function renderHome(app) {
   var b1 = el("button", "wide", "&#128241; Meedoen met mijn team");
   b1.onclick = function () { view = teamId ? "play" : "join"; render(); };
   var b2 = el("button", "wide ghost", "&#127919; Ik ben de quizmaster");
-  b2.onclick = function () { view = pin || !s.hasPin ? (s.hasPin ? "admin-login" : "admin-setup") : "admin-login"; render(); };
+  b2.onclick = function () { view = "admin-login"; render(); };
   r.appendChild(b1); r.appendChild(b2);
   c.appendChild(r);
   app.appendChild(c);
