@@ -113,7 +113,8 @@ async function handleApi(req, res, url) {
     const b = req.method === "POST" ? await body(req, res) : null;
     const role = ((b ? b.role : url.searchParams.get("role")) || "player");
     const pin = b ? b.pin : (url.searchParams.get("pin") || "");
-    if (role === "admin" && !isPinOk({ pin })) {
+    if (role === "admin" && !(state.pin && pin === state.pin)) {
+      // teller niet verhogen: dit is een statustoets, geen inlogpoging
       return json(res, 403, { error: "PIN klopt niet." });
     }
     const out = {
@@ -359,7 +360,7 @@ function api(path, data) {
 }
 
 function refreshState() {
-  var role = view.indexOf("admin") === 0 ? "admin" : "player";
+  var role = (view.indexOf("admin") === 0 && pin) ? "admin" : "player";
   return api("/api/state", { role: role, pin: pin }).then(function (st) {
     if (st && st.error) {
       // PIN onjuist of verouderd: netjes terug naar het inlogscherm
