@@ -480,7 +480,7 @@ function renderAdminLogin(app) {
       api("/api/admin/setup-pin", { pin: p1.value }).then(function (r) {
         if (r.error) { msg = r.error; render(); return; }
         pin = p1.value; localStorage.setItem("pin", pin);
-        view = "admin-live"; render();
+        view = "admin-live"; refreshAndRender();
       });
     };
     c.appendChild(b);
@@ -494,7 +494,7 @@ function renderAdminLogin(app) {
         if (r.error) { msg = r.error; render(); return; }
         if (!r.ok) { msg = "PIN klopt niet."; render(); return; }
         pin = p2.value; localStorage.setItem("pin", pin);
-        view = "admin-live"; render();
+        view = "admin-live"; refreshAndRender();
       });
     };
     c.appendChild(b2);
@@ -623,7 +623,7 @@ function renderAdminLive(app) {
     s.status === "done" ? "Quiz afgerond." : "Ronde actief: " + (s.activeRound + 1));
   c.appendChild(cInfo);
   var br = el("div", "btnrow");
-  s.rounds.forEach(function (rd, i) {
+  (s.rounds || []).forEach(function (rd, i) {
     var b = el("button", s.activeRound === i ? "" : "ghost", "Ronde " + (i + 1));
     b.onclick = function () { api("/api/admin/control", { pin: pin, action: "round", round: i }).then(refreshAndRender); };
     br.appendChild(b);
@@ -649,7 +649,7 @@ function renderAdminLive(app) {
       api("/api/admin/change-pin", { pin: o.value, newPin: n.value }).then(function (r) {
         if (r.error) { msg = r.error; render(); return; }
         pin = n.value; localStorage.setItem("pin", pin);
-        pinFormOpen = false; msg = "PIN gewijzigd!"; render();
+        pinFormOpen = false; msg = "PIN gewijzigd!"; refreshAndRender();
       });
     };
     var cl = el("button", "ghost", "Annuleren");
@@ -665,14 +665,14 @@ function renderAdminLive(app) {
   // Tussenstand
   var sc = el("div", "card");
   sc.appendChild(el("h2", null, "&#127942; Tussenstand"));
-  s.teams.slice().sort(function (a, b) { return b.score - a.score; }).forEach(function (t, i) {
+  (s.teams || []).slice().sort(function (a, b) { return b.score - a.score; }).forEach(function (t, i) {
     sc.appendChild(el("div", "row" + (i === 0 ? " top" : ""),
       "<span>" + (["&#129351;","&#129352;","&#129353;"][i] || (i + 1) + ".") + " " + t.name + "</span><span class='score'>" + t.score + "</span>"));
   });
   app.appendChild(sc);
 
   // Antwoorden per ronde
-  s.rounds.forEach(function (rd, ri) {
+  (s.rounds || []).forEach(function (rd, ri) {
     var card = el("div", "card");
     card.appendChild(el("h2", null, rd.name));
     if (!s.teams.length) { card.appendChild(el("p", null, "Nog geen teams ingestroomd\u2026")); }
