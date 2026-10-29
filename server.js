@@ -11,6 +11,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const PORT = process.env.PORT || 3000;
 const DATA_FILE = path.join(__dirname, "data.json");
@@ -39,17 +40,27 @@ function loadState() {
     if (fs.existsSync(DATA_FILE)) {
       state = Object.assign(state, JSON.parse(fs.readFileSync(DATA_FILE, "utf8")));
     }
-  } catch (e) { /* bij fout: verse start */ }
+  } catch (e) { console.error("data.json kon niet gelezen worden, vers gestart:", e.message); /* bij fout: verse start */ }
 }
 function saveState() {
-  try { fs.writeFileSync(DATA_FILE, JSON.stringify(state, null, 2)); } catch (e) {}
+  try {
+    // atomair schrijven: eerst tijdelijk bestand, dan hernoemen
+    fs.writeFileSync(DATA_FILE + ".tmp", JSON.stringify(state, null, 2));
+    fs.renameSync(DATA_FILE + ".tmp", DATA_FILE);
+  } catch (e) {
+    console.error("Opslaan van data.json mislukt:", e.message);
+  }
 }
 
 // ---------- Helpers ----------
 
 function newId() {
-  return Math.random().toString(36).slice(2, 10);
+  return crypto.randomUUID();
 }
+
+// simpele beveiliging tegen PIN raden: 5 fouten = 15 minuten blokkade
+let pinFails = 0;
+let pinBlockedUntil = 0;
 
 function teamScore(team) {
   let s = 0;
@@ -62,8 +73,14 @@ function teamScore(team) {
 function body(req) {
   return new Promise((resolve) => {
     let data = "";
-    req.on("data", (c) => (data += c));
+    let overflow = false;
+    req.on("data", (c) => {
+      if (overflow) return;
+      data += c;
+      if (data.length > 100 * 1024) { overflow = true; data = ""; req.destroy(); resolve({}); }
+    });
     req.on("end", () => {
+      if (overflow) return;
       try { resolve(JSON.parse(data || "{}")); }
       catch { resolve({}); }
     });
@@ -76,7 +93,15 @@ function json(res, code, obj) {
 }
 
 function isPinOk(obj) {
-  return state.pin && obj.pin === state.pin;
+  if (Date.now() < pinBlockedUntil) return false;
+  const ok = !!state.pin && obj.pin === state.pin;
+  if (!ok) {
+    pinFails += 1;
+    if (pinFails >= 5) { pinBlockedUntil = Date.now() + 15 * 60 * 1000; pinFails = 0; }
+  } else {
+    pinFails = 0;
+  }
+  return ok;
 }
 
 // ---------- API ----------
@@ -84,10 +109,13 @@ function isPinOk(obj) {
 async function handleApi(req, res, url) {
   const route = url.pathname;
 
-  if (req.method === "GET" && route === "/api/state") {
-    const q = url.searchParams;
-    const role = q.get("role") || "player";
-    const pin = q.get("pin") || "";
+  if (route === "/api/state" && (req.method === "GET" || req.method === "POST")) {
+    const b = req.method === "POST" ? await body(req, res) : null;
+    const role = ((b ? b.role : url.searchParams.get("role")) || "player");
+    const pin = b ? b.pin : (url.searchParams.get("pin") || "");
+    if (role === "admin" && !isPinOk({ pin })) {
+      return json(res, 403, { error: "PIN klopt niet." });
+    }
     const out = {
       quizName: state.quizName,
       code: state.code,
@@ -96,7 +124,7 @@ async function handleApi(req, res, url) {
       theme: state.theme,
       hasPin: !!state.pin,
     };
-    if (role === "admin" && pin && pin === state.pin) {
+    if (role === "admin") {
       out.rounds = state.rounds;
       out.teams = state.teams.map((t) => ({
         id: t.id, name: t.name, answers: t.answers || {}, marks: t.marks || {},
@@ -142,6 +170,9 @@ async function handleApi(req, res, url) {
     if (!team) return json(res, 400, { error: "Team onbekend, opnieuw meedoen." });
     const r = parseInt(b.round, 10);
     if (!(r >= 0 && r < state.rounds.length)) return json(res, 400, { error: "Onbekende ronde." });
+    if (state.status !== "live" || r !== state.activeRound) {
+      return json(res, 400, { error: "Deze ronde is nu niet actief." });
+    }
     const list = (Array.isArray(b.answers) ? b.answers : []).map((a) => String(a || "").slice(0, 200));
     list.length = state.rounds[r].questions.length;
     team.answers[r] = list;
@@ -180,13 +211,20 @@ async function handleApi(req, res, url) {
     const b = await body(req, res);
     if (!isPinOk(b)) return json(res, 403, { error: "PIN klopt niet." });
     if (b.quizName) state.quizName = String(b.quizName).slice(0, 60);
-    if (b.theme) state.theme = Object.assign(state.theme, b.theme);
+    if (b.theme) {
+      // alleen bekende sleutels en geldige hex-kleuren accepteren
+      const okKeys = ["bg", "card", "accent", "text", "onBg"];
+      const hx = /^#[0-9a-f]{6}$/i;
+      for (const k of okKeys) {
+        if (typeof b.theme[k] === "string" && hx.test(b.theme[k])) state.theme[k] = b.theme[k];
+      }
+    }
     if (Array.isArray(b.rounds)) {
       state.rounds = b.rounds.map((r) => ({
         name: String(r.name || "Ronde").slice(0, 80),
         questions: (r.questions || []).map((q) => String(q || "").slice(0, 300)),
         answers: (r.answers || []).map((a) => String(a || "").slice(0, 200)),
-      })).filter((r) => r.questions.length > 0);
+      })).filter((r) => r.questions.some((q) => q.trim() !== ""));
     }
     saveState();
     return json(res, 200, { ok: true });
@@ -220,6 +258,7 @@ async function handleApi(req, res, url) {
     if (!team) return json(res, 400, { error: "Team onbekend." });
     const r = parseInt(b.round, 10), q = parseInt(b.q, 10);
     if (!(r >= 0 && r < state.rounds.length)) return json(res, 400, { error: "Onbekende ronde." });
+    if (!(q >= 0 && q < state.rounds[r].questions.length)) return json(res, 400, { error: "Onbekende vraag." });
     if (!team.marks[r]) team.marks[r] = {};
     team.marks[r][q] = !!b.ok;
     saveState();
@@ -284,15 +323,22 @@ const CLIENT_HTML = `<!DOCTYPE html>
 <script>
 "use strict";
 var pin = localStorage.getItem("pin") || "";
-var teamId = sessionStorage.getItem("teamId") || "";
-var teamName = sessionStorage.getItem("teamName") || "";
+var teamId = localStorage.getItem("teamId") || "";
+var teamName = localStorage.getItem("teamName") || "";
 var view = "home"; // home | join | play | admin-login | admin-setup | admin-live | admin-theme
 var s = null; // laatste serverstate
-var myAnswers = {}; var pinFormOpen = false;
+var myAnswers = {}; var pinFormOpen = false; var openTeams = {};
 var msg = "";
 
 function $(sel, el) { return (el || document).querySelector(sel); }
 function el(tag, cls, html) { var e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
+
+// tekst van gebruikers veilig invoegen (tegen XSS)
+function esc(x) {
+  return String(x == null ? "" : x).replace(/[&<>"']/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+  });
+}
 
 function applyTheme(t) {
   var r = document.documentElement.style;
@@ -310,8 +356,12 @@ function api(path, data) {
 
 function refreshState() {
   var role = view.indexOf("admin") === 0 ? "admin" : "player";
-  var url = "/api/state?role=" + role + (role === "admin" && pin ? "&pin=" + encodeURIComponent(pin) : "");
-  return fetch(url).then(function (r) { return r.json(); }).then(function (st) {
+  return api("/api/state", { role: role, pin: pin }).then(function (st) {
+    if (st && st.error) {
+      // PIN onjuist of verouderd: netjes terug naar het inlogscherm
+      if (role === "admin") { pin = ""; localStorage.removeItem("pin"); view = "admin-login"; }
+      return refreshState();
+    }
     s = st; applyTheme(st.theme || {}); return st;
   });
 }
@@ -364,8 +414,8 @@ function renderJoin(app) {
     api("/api/join", { code: code.value, team: name.value }).then(function (r) {
       if (r.error) { msg = r.error; render(); return; }
       teamId = r.teamId; teamName = r.teamName;
-      sessionStorage.setItem("teamId", teamId);
-      sessionStorage.setItem("teamName", teamName);
+      localStorage.setItem("teamId", teamId);
+      localStorage.setItem("teamName", teamName);
       view = "play"; render();
     });
   };
@@ -379,7 +429,7 @@ function renderPlay(app) {
     c0.appendChild(el("h2", null, "&#127942; Einduitslag"));
     (s.finalScores || []).forEach(function (t, i) {
       c0.appendChild(el("div", "row" + (i === 0 ? " top" : ""),
-        "<span>" + ["&#129351;","&#129352;","&#129353;"][i] + " " + t.name + "</span><span class='score'>" + t.score + "</span>"));
+        "<span>" + (["&#129351;","&#129352;","&#129353;"][i] || (i + 1) + ".") + " " + esc(t.name) + "</span><span class='score'>" + t.score + "</span>"));
     });
     app.appendChild(c0);
     return;
@@ -396,13 +446,13 @@ function renderPlay(app) {
   s.round.questions.forEach(function (q, i) {
     c.appendChild(el("label", null, (i + 1) + ". " + q));
     var inp = el("input"); inp.placeholder = "Jullie antwoord\u2026";
-    inp.value = myAnswers[i] || "";
-    inp.oninput = function () { myAnswers[i] = inp.value; };
+    inp.value = ((myAnswers[s.round.index] || {})[i]) || "";
+    inp.oninput = function () { (myAnswers[s.round.index] = myAnswers[s.round.index] || {})[i] = inp.value; };
     c.appendChild(inp);
   });
   var b = el("button", "wide", "Antwoorden insturen");
   b.onclick = function () {
-    var arr = s.round.questions.map(function (_, i) { return myAnswers[i] || ""; });
+    var arr = s.round.questions.map(function (_, i) { return (myAnswers[s.round.index] || {})[i] || ""; });
     api("/api/submit", { teamId: teamId, round: s.round.index, answers: arr }).then(function (r) {
       if (r.error) { msg = r.error; }
       else { msg = "&#10003;"; c.innerHTML = "<h2>&#10003; Antwoorden ingediend!</h2><p>De quizmaster bekijkt ze nu. Wacht op de volgende ronde \u2014 die verschijnt vanzelf.</p>"; }
@@ -447,7 +497,18 @@ function renderAdminLogin(app) {
   app.appendChild(c);
 }
 
+function adminTabs(app) {
+  var tabs = el("div", "tabs");
+  [["admin-live","&#127919; Live"],["admin-setup","&#9998;&#65039; Vragen"],["admin-theme","&#127912; Stijl"]].forEach(function (pair) {
+    var b = el("button", view === pair[0] ? "on" : "", pair[1]);
+    b.onclick = function () { view = pair[0]; render(); };
+    tabs.appendChild(b);
+  });
+  app.appendChild(tabs);
+}
+
 function renderAdminSetup(app) {
+  adminTabs(app);
   var c = el("div", "card");
   c.appendChild(el("h2", null, "&#9998;&#65039; Vragen & antwoorden"));
   c.appendChild(el("p", null, "Stel hier je quiz samen: rondes, vragen en correcte antwoorden."));
@@ -505,6 +566,7 @@ function renderAdminSetup(app) {
 }
 
 function renderAdminTheme(app) {
+  adminTabs(app);
   var c = el("div", "card");
   c.appendChild(el("h2", null, "&#127912; Stijl & kleuren"));
   c.appendChild(el("p", null, "Past de kleuren direct overal aan en slaat ze op bij de quiz."));
@@ -530,13 +592,7 @@ function renderAdminTheme(app) {
 }
 
 function renderAdminLive(app) {
-  var tabs = el("div", "tabs");
-  [["admin-live","&#127919; Live"],["admin-setup","&#9998;&#65039; Vragen"],["admin-theme","&#127912; Stijl"]].forEach(function (pair) {
-    var b = el("button", view === pair[0] ? "on" : "", pair[1]);
-    b.onclick = function () { view = pair[0]; render(); };
-    tabs.appendChild(b);
-  });
-  app.appendChild(tabs);
+  adminTabs(app);
 
   var c = el("div", "card");
 
@@ -546,7 +602,7 @@ function renderAdminLive(app) {
     dc.appendChild(el("h2", null, "&#127942; Quiz afgerond!"));
     (s.finalScores || s.teams.slice().sort(function (a, b) { return b.score - a.score; })).forEach(function (t, i) {
       dc.appendChild(el("div", "row" + (i === 0 ? " top" : ""),
-        "<span>" + ["&#129351;","&#129352;","&#129353;"][i] + " " + t.name + "</span><span class='score'>" + t.score + "</span>"));
+        "<span>" + (["&#129351;","&#129352;","&#129353;"][i] || (i + 1) + ".") + " " + esc(t.name) + "</span><span class='score'>" + t.score + "</span>"));
     });
     var nb = el("button", "wide", "&#128260; Nieuwe quizavond starten");
     nb.onclick = function () {
@@ -581,7 +637,7 @@ function renderAdminLive(app) {
     box.style.cssText = "margin-top:10px";
     box.appendChild(el("label", null, "Huidige PIN"));
     var o = el("input"); o.type = "password"; o.inputMode = "numeric"; box.appendChild(o);
-    box.appendChild(el("label", null, "Nieuwe PIN (4 t/v 6 cijfers)"));
+    box.appendChild(el("label", null, "Nieuwe PIN (4 t/m 6 cijfers)"));
     var n = el("input"); n.type = "password"; n.inputMode = "numeric"; box.appendChild(n);
     var sv = el("button", null, "PIN wijzigen");
     sv.onclick = function () {
@@ -617,12 +673,14 @@ function renderAdminLive(app) {
     if (!s.teams.length) { card.appendChild(el("p", null, "Nog geen teams ingestroomd\u2026")); }
     s.teams.forEach(function (t) {
       var d = el("details");
+      d.open = !!openTeams[t.id + "|" + ri];
+      d.ontoggle = function () { openTeams[t.id + "|" + ri] = d.open; };
       var submitted = t.answers && t.answers[ri];
-      d.appendChild(el("summary", null, t.name + " <span class='badge" + (submitted ? "" : " wait") + "'>" + (submitted ? "&#10003; ingediend" : "wacht") + "</span>"));
+      d.appendChild(el("summary", null, esc(t.name) + " <span class='badge" + (submitted ? "" : " wait") + "'>" + (submitted ? "&#10003; ingediend" : "wacht") + "</span>"));
       rd.questions.forEach(function (q, qi) {
         var row = el("div", "qrow");
         var given = submitted ? (submitted[qi] || "\u2014") : "\u2014";
-        row.appendChild(el("span", null, (qi + 1) + ". " + given + " <b>[" + rd.answers[qi] + "]</b>"));
+        row.appendChild(el("span", null, (qi + 1) + ". " + esc(given) + " <b>[" + esc(rd.answers[qi]) + "]</b>"));
         var btns = el("span");
         var okB = el("button", "ok" + (t.marks[ri] && t.marks[ri][qi] === true ? " on" : ""), "&#10003;");
         okB.onclick = function () { api("/api/admin/score", { pin: pin, teamId: t.id, round: ri, q: qi, ok: true }).then(refreshAndRender); };
