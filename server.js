@@ -194,6 +194,10 @@ async function handleApi(req, res, url) {
 
   if (route === "/api/admin/login" && req.method === "POST") {
     const b = await body(req, res);
+    if (Date.now() < pinBlockedUntil) {
+      const min = Math.ceil((pinBlockedUntil - Date.now()) / 60000);
+      return json(res, 429, { error: "Te veel foutieve pogingen. Wacht nog ongeveer " + min + " minuten en probeer opnieuw." });
+    }
     return json(res, 200, { ok: isPinOk(b) });
   }
 
@@ -487,6 +491,7 @@ function renderAdminLogin(app) {
     var b2 = el("button", "wide", "Inloggen");
     b2.onclick = function () {
       api("/api/admin/login", { pin: p2.value }).then(function (r) {
+        if (r.error) { msg = r.error; render(); return; }
         if (!r.ok) { msg = "PIN klopt niet."; render(); return; }
         pin = p2.value; localStorage.setItem("pin", pin);
         view = "admin-live"; render();
