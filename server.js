@@ -139,6 +139,7 @@ async function handleApi(req, res, url) {
           index: state.activeRound,
           name: state.rounds[state.activeRound].name,
           questions: state.rounds[state.activeRound].questions,
+          choices: state.rounds[state.activeRound].choices || [],
         };
       }
       if (state.status === "done") {
@@ -234,6 +235,7 @@ async function handleApi(req, res, url) {
         name: String(r.name || "Ronde").slice(0, 80),
         questions: (r.questions || []).map((q) => String(q || "").slice(0, 300)),
         answers: (r.answers || []).map((a) => String(a || "").slice(0, 200)),
+        choices: (r.choices || []).map((c) => (Array.isArray(c) ? c.map((x) => String(x || "").slice(0, 200)).filter((x) => x.trim() !== "") : [])),
       })).filter((r) => r.questions.some((q) => q.trim() !== ""));
     }
     saveState();
@@ -305,6 +307,7 @@ const CLIENT_HTML = `<!DOCTYPE html>
   .tabs { display:flex; gap:6px; background:var(--card); padding:4px; border-radius:12px; margin-bottom:16px; flex-wrap:wrap; }
   .tabs button { flex:1; min-width:110px; background:transparent; color:#666; }
   .tabs button.on { background:var(--accent); color:var(--text); }
+  button.on { background:var(--accent); color:var(--text); }
   .row { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:10px 14px; border-radius:10px; background:#fff; border:1px solid #e8dfc9; margin-top:8px; }
   .row.top { border:2px solid var(--accent); background:var(--accent); }
   .score { font-weight:800; font-size:20px; }
@@ -461,11 +464,27 @@ function renderPlay(app) {
   var c = el("div", "card");
   c.appendChild(el("h2", null, s.round.name));
   s.round.questions.forEach(function (q, i) {
-    c.appendChild(el("label", null, (i + 1) + ". " + q));
-    var inp = el("input"); inp.placeholder = "Jullie antwoord\u2026";
-    inp.value = ((myAnswers[s.round.index] || {})[i]) || "";
-    inp.oninput = function () { (myAnswers[s.round.index] = myAnswers[s.round.index] || {})[i] = inp.value; };
-    c.appendChild(inp);
+    c.appendChild(el("label", null, (i + 1) + ". " + esc(q)));
+    var opts = (s.round.choices && s.round.choices[i]) || [];
+    if (opts.length > 1) {
+      var wrap = el("div", "btnrow");
+      opts.forEach(function (o) {
+        var sel = ((myAnswers[s.round.index] || {})[i] === o);
+        var ob = el("button", sel ? "on" : "ghost", esc(o));
+        ob.style.textAlign = "left";
+        ob.onclick = function () {
+          (myAnswers[s.round.index] = myAnswers[s.round.index] || {})[i] = o;
+          render();
+        };
+        wrap.appendChild(ob);
+      });
+      c.appendChild(wrap);
+    } else {
+      var inp = el("input"); inp.placeholder = "Jullie antwoord\u2026";
+      inp.value = ((myAnswers[s.round.index] || {})[i]) || "";
+      inp.oninput = function () { (myAnswers[s.round.index] = myAnswers[s.round.index] || {})[i] = inp.value; };
+      c.appendChild(inp);
+    }
   });
   var b = el("button", "wide", "Antwoorden insturen");
   b.onclick = function () {
@@ -537,7 +556,7 @@ function renderAdminSetup(app) {
 
   var roundsBox = el("div");
   var rounds = (s.rounds && s.rounds.length ? s.rounds : [{ name: "Ronde 1", questions: [""], answers: [""] }]).map(function (r) {
-    return { name: r.name, questions: r.questions.slice(), answers: (r.answers || []).slice() };
+    return { name: r.name, questions: r.questions.slice(), answers: (r.answers || []).slice(), choices: ((r.choices || []).map(function (c) { return (c || []).slice(); })) };
   });
 
   function drawRounds() {
@@ -557,13 +576,22 @@ function renderAdminSetup(app) {
         i1.oninput = function () { rd.questions[qi] = i1.value; };
         var i2 = el("input"); i2.placeholder = "Correct antwoord"; i2.value = rd.answers[qi] || "";
         i2.oninput = function () { rd.answers[qi] = i2.value; };
+        var i3 = el("input"); i3.placeholder = "Keuzeopties (optioneel, scheiden met | )";
+        i3.value = ((rd.choices && rd.choices[qi]) || []).join(" | ");
+        i3.oninput = function () {
+          rd.choices = rd.choices || [];
+          rd.choices[qi] = i3.value.split("|").map(function (s) { return s.trim(); }).filter(function (s) { return s !== ""; });
+        };
         var rm = el("button", "ghost", "&#10005;");
-        rm.onclick = function () { rd.questions.splice(qi, 1); rd.answers.splice(qi, 1); drawRounds(); };
-        ln.appendChild(i1); ln.appendChild(i2); ln.appendChild(rm);
+        rm.onclick = function () { rd.questions.splice(qi, 1); rd.answers.splice(qi, 1); if (rd.choices) rd.choices.splice(qi, 1); drawRounds(); };
+        ln.appendChild(i1); ln.appendChild(i2); ln.appendChild(i3); ln.appendChild(rm);
         box.appendChild(ln);
+        var hint = el("p", null, "Meerkeuze? Vul bij &#39;Keuzeopties&#39; de antwoorden gescheiden met | (bijv: A | B | C). Leeg laten = gewone invulvraag.");
+        hint.style.cssText = "font-size:12px;color:#8a7a5c;margin:0 0 8px";
+        box.appendChild(hint);
       });
       var add = el("button", "ghost", "+ Vraag");
-      add.onclick = function () { rd.questions.push(""); rd.answers.push(""); drawRounds(); };
+      add.onclick = function () { rd.questions.push(""); rd.answers.push(""); (rd.choices = rd.choices || []).push([]); drawRounds(); };
       box.appendChild(add);
       roundsBox.appendChild(box);
     });
@@ -573,7 +601,7 @@ function renderAdminSetup(app) {
 
   var br = el("div", "btnrow");
   var addR = el("button", "ghost", "+ Ronde toevoegen");
-  addR.onclick = function () { rounds.push({ name: "Ronde " + (rounds.length + 1), questions: [""], answers: [""] }); drawRounds(); };
+  addR.onclick = function () { rounds.push({ name: "Ronde " + (rounds.length + 1), questions: [""], answers: [""], choices: [[]] }); drawRounds(); };
   var save = el("button", null, "Opslaan");
   save.onclick = function () {
     api("/api/admin/update", { pin: pin, quizName: qn.value, code: qc.value, rounds: rounds }).then(function (r) {
