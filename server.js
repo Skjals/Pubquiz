@@ -325,7 +325,7 @@ const CLIENT_HTML = `<!DOCTYPE html>
 </head>
 <body>
 <div class="wrap">
-  <h1>&#127968; Pubquiz</h1>
+  <h1 id="appTitle">&#127968; Pubquiz</h1>
   <p class="sub" id="subtitle"></p>
   <div id="app"></div>
   <p class="hint" id="hint"></p>
@@ -387,6 +387,7 @@ function render() {
   var app = $("#app");
   app.innerHTML = "";
   $("#subtitle").textContent = "Quizcode: " + (s ? s.code : "") + (s && s.teamCount != null ? " — " + s.teamCount + " teams" : "");
+  $("#appTitle").innerHTML = "&#127968; " + esc(s && s.quizName ? s.quizName : "Pubquiz");
   $("#hint").textContent = "";
 
   if (msg) { app.appendChild(el("div", "err", msg)); msg = ""; }
