@@ -133,6 +133,7 @@ async function handleApi(req, res, url) {
       }));
     } else {
       out.teamCount = state.teams.length;
+      if (b && b.teamId) out.myTeam = state.teams.some((t) => t.id === b.teamId);
       if (state.activeRound >= 0 && state.rounds[state.activeRound]) {
         out.round = {
           index: state.activeRound,
@@ -332,8 +333,10 @@ const CLIENT_HTML = `<!DOCTYPE html>
 <script>
 "use strict";
 var pin = localStorage.getItem("pin") || "";
-var teamId = localStorage.getItem("teamId") || "";
-var teamName = localStorage.getItem("teamName") || "";
+var savedTeam = null; try { savedTeam = JSON.parse(localStorage.getItem("team") || "null"); } catch (e) {}
+var teamId = (savedTeam && savedTeam.teamId) || "";
+var teamName = (savedTeam && savedTeam.teamName) || "";
+var teamCode = (savedTeam && savedTeam.code) || "";
 var view = "home"; // home | join | play | admin-login | admin-setup | admin-live | admin-theme
 var s = null; // laatste serverstate
 var myAnswers = {}; var pinFormOpen = false; var openTeams = {};
@@ -365,11 +368,16 @@ function api(path, data) {
 
 function refreshState() {
   var role = (view.indexOf("admin") === 0 && pin) ? "admin" : "player";
-  return api("/api/state", { role: role, pin: pin }).then(function (st) {
+  return api("/api/state", { role: role, pin: pin, teamId: teamId }).then(function (st) {
     if (st && st.error) {
       // PIN onjuist of verouderd: netjes terug naar het inlogscherm
       if (role === "admin") { pin = ""; localStorage.removeItem("pin"); view = "admin-login"; }
       return refreshState();
+    }
+    if (teamId && st.myTeam === false) {
+      teamId = ""; teamName = ""; teamCode = "";
+      localStorage.removeItem("team");
+      if (view === "play") { view = "join"; msg = "Jullie team hoort niet (meer) bij deze quiz — meld je opnieuw aan met de quizcode."; }
     }
     s = st; applyTheme(st.theme || {}); return st;
   });
@@ -400,7 +408,7 @@ function renderHome(app) {
   c.appendChild(el("p", null, "Ben je een team dat mee wilt doen, of ben jij de quizmaster?"));
   var r = el("div", "btnrow");
   var b1 = el("button", "wide", "&#128241; Meedoen met mijn team");
-  b1.onclick = function () { view = teamId ? "play" : "join"; render(); };
+  b1.onclick = function () { view = (teamId && teamCode === s.code) ? "play" : "join"; render(); };
   var b2 = el("button", "wide ghost", "&#127919; Ik ben de quizmaster");
   b2.onclick = function () { view = "admin-login"; render(); };
   r.appendChild(b1); r.appendChild(b2);
@@ -422,9 +430,8 @@ function renderJoin(app) {
   b.onclick = function () {
     api("/api/join", { code: code.value, team: name.value }).then(function (r) {
       if (r.error) { msg = r.error; render(); return; }
-      teamId = r.teamId; teamName = r.teamName;
-      localStorage.setItem("teamId", teamId);
-      localStorage.setItem("teamName", teamName);
+      teamId = r.teamId; teamName = r.teamName; teamCode = s.code;
+      localStorage.setItem("team", JSON.stringify({ code: teamCode, teamId: teamId, teamName: teamName }));
       view = "play"; render();
     });
   };
