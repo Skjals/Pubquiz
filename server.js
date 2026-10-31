@@ -319,11 +319,11 @@ const CLIENT_HTML = `<!DOCTYPE html>
   .badge.wait { background:#9e9e9e; }
   .hint { font-size:12px; color:var(--onBg); text-align:center; margin-top:10px; }
   .err { color:#c62828; font-weight:600; font-size:14px; margin-top:8px; }
-  .qline { display:grid; grid-template-columns:1fr 1fr 30px; gap:8px; margin-top:8px; }
+  .qline { display:grid; grid-template-columns:1fr 1fr 1.3fr 44px; gap:8px; margin-top:8px; }
   .qline input { padding:8px; font-size:14px; }
   details { background:#fff; border:1px solid #e8dfc9; border-radius:10px; padding:10px 14px; margin-top:8px; }
   summary { cursor:pointer; font-weight:700; }
-  @media (max-width:600px){ .qline{ grid-template-columns:1fr; } }
+  @media (max-width:600px){ .qline{ grid-template-columns:1fr; } .qline button{ max-width:90px; } }
 </style>
 </head>
 <body>
@@ -582,7 +582,8 @@ function renderAdminSetup(app) {
           rd.choices = rd.choices || [];
           rd.choices[qi] = i3.value.split("|").map(function (s) { return s.trim(); }).filter(function (s) { return s !== ""; });
         };
-        var rm = el("button", "ghost", "&#10005;");
+        var rm = el("button", "ghost", "&#128465;&#65039;");
+        rm.title = "Deze vraag verwijderen";
         rm.onclick = function () { rd.questions.splice(qi, 1); rd.answers.splice(qi, 1); if (rd.choices) rd.choices.splice(qi, 1); drawRounds(); };
         ln.appendChild(i1); ln.appendChild(i2); ln.appendChild(i3); ln.appendChild(rm);
         box.appendChild(ln);
