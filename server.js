@@ -216,6 +216,10 @@ async function handleApi(req, res, url) {
     const b = await body(req, res);
     if (!isPinOk(b)) return json(res, 403, { error: "PIN klopt niet." });
     if (b.quizName) state.quizName = String(b.quizName).slice(0, 60);
+    if (b.code) {
+      const nc = String(b.code).trim().toUpperCase().replace(/\s+/g, "");
+      if (/^[A-Z0-9]{4,8}$/.test(nc)) state.code = nc;
+    }
     if (b.theme) {
       // alleen bekende sleutels en geldige hex-kleuren accepteren
       const okKeys = ["bg", "card", "accent", "text", "onBg"];
@@ -520,6 +524,8 @@ function renderAdminSetup(app) {
   c.appendChild(el("p", null, "Stel hier je quiz samen: rondes, vragen en correcte antwoorden."));
   c.appendChild(el("label", null, "Naam van de quiz"));
   var qn = el("input"); qn.value = s.quizName; c.appendChild(qn);
+  c.appendChild(el("label", null, "Quizcode (4 t/m 8 letters/cijfers, waar teams mee instromen)"));
+  var qc = el("input"); qc.value = s.code; c.appendChild(qc);
 
   var roundsBox = el("div");
   var rounds = (s.rounds && s.rounds.length ? s.rounds : [{ name: "Ronde 1", questions: [""], answers: [""] }]).map(function (r) {
@@ -562,7 +568,7 @@ function renderAdminSetup(app) {
   addR.onclick = function () { rounds.push({ name: "Ronde " + (rounds.length + 1), questions: [""], answers: [""] }); drawRounds(); };
   var save = el("button", null, "Opslaan");
   save.onclick = function () {
-    api("/api/admin/update", { pin: pin, quizName: qn.value, rounds: rounds }).then(function (r) {
+    api("/api/admin/update", { pin: pin, quizName: qn.value, code: qc.value, rounds: rounds }).then(function (r) {
       msg = r.error || "Opgeslagen!"; refreshAndRender();
     });
   };
